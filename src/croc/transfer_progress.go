@@ -49,6 +49,9 @@ func (c *Client) progressDisplaySnapshot() *transferProgressDisplay {
 }
 
 func (c *Client) ensureProgressDisplay(bundle bool) *transferProgressDisplay {
+	if c.Options.SuppressOutput {
+		return nil
+	}
 	if !bundle && !(c.bundles.peerHandshake && (c.Options.IsSender || c.bundles.manifest) && c.bundleTransferEligible() && len(c.FilesToTransfer) > 1) {
 		return nil
 	}

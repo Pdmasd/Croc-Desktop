@@ -823,6 +823,7 @@ func (c *Client) newBundleProgress(indices []int, offsets []int64) func(int64, i
 			current++
 		}
 		display.advance(c.FilesToTransfer[indices[current]].Name, indices[current]+1, int64(length))
+		c.reportProgress(int64(length))
 	}
 }
 

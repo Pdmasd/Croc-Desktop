@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	log "github.com/schollz/croc/v11/src/logger"
@@ -43,7 +44,8 @@ func (c *Client) preflightReceiveFile(index int) (receiveDecision, error) {
 	}
 	matches := false
 	if exists && file.Size > 0 && file.Symlink == "" && stat.Mode().IsRegular() && stat.Size() == file.Size {
-		hash, err := receiveFileHash(c.clientContext(), destination, c.Options.HashAlgorithm, !c.Options.SendingText)
+		hashPath := filepath.Join(root.Name(), filepath.FromSlash(destination))
+		hash, err := receiveFileHash(c.clientContext(), hashPath, c.Options.HashAlgorithm, !c.Options.SendingText)
 		if err != nil {
 			return receiveDecision{}, fmt.Errorf("hash existing destination %q: %w", destination, err)
 		}

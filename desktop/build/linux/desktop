@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=My Product
+Comment=A CrocDesktop application
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/crocdesktop.exe %u
+Terminal=false
+Type=Application
+Icon=crocdesktop.exe
+Categories=Utility;
+StartupWMClass=crocdesktop.exe
+
+ 

@@ -1,0 +1,6 @@
+frontend/node_modules/
+.cache/
+.task/
+bin/
+*.syso
+*.tsbuildinfo

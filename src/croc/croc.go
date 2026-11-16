@@ -133,6 +133,12 @@ type Options struct {
 	ExtendedClipboard bool
 	NoUpdateCheck     bool
 	Transport         TransportMode `json:",omitempty"`
+	// OnPhase and OnProgress are optional observers for desktop integrations.
+	// Callbacks may be invoked from transfer goroutines and are not serialized.
+	OnPhase        func(string)       `json:"-"`
+	OnProgress     func(int64, int64) `json:"-"`
+	ReceiveDir     string             `json:"-"`
+	SuppressOutput bool               `json:"-"`
 }
 
 // TransportMode controls how a sender selects the file-data connection after
@@ -270,12 +276,15 @@ type Client struct {
 	// overwrite c.Options.RelayPorts are launched.
 	localRelayPort string
 
-	barMu              sync.RWMutex
-	bar                *progressbar.ProgressBar
-	progressDisplay    *transferProgressDisplay
-	longestFilename    int
-	firstSend          bool
-	receiveStatusWidth int
+	barMu               sync.RWMutex
+	progressMu          sync.Mutex
+	progressTransferred int64
+	progressTotal       int64
+	bar                 *progressbar.ProgressBar
+	progressDisplay     *transferProgressDisplay
+	longestFilename     int
+	firstSend           bool
+	receiveStatusWidth  int
 
 	mutex                    *sync.Mutex
 	receiveMutex             *sync.Mutex
@@ -686,6 +695,9 @@ func (c *Client) activeTransferStarted() bool {
 
 func (c *Client) markTransferStarted() {
 	c.transferStarted.Store(true)
+	if c.Options.OnPhase != nil {
+		c.Options.OnPhase("Transferring")
+	}
 }
 
 func (c *Client) markSenderRouteReady() {
@@ -984,7 +996,11 @@ func (c *Client) receiveFilesystem() (*receivefs.Root, error) {
 	if c.receiveRoot != nil {
 		return c.receiveRoot, nil
 	}
-	root, err := receivefs.OpenRoot(".")
+	rootPath := c.Options.ReceiveDir
+	if rootPath == "" {
+		rootPath = "."
+	}
+	root, err := receivefs.OpenRoot(rootPath)
 	if err != nil {
 		return nil, err
 	}
@@ -1804,6 +1820,19 @@ func (c *Client) receiverReconnectRelayAttempt(attempt int) error {
 // Send will send the specified file
 func (c *Client) Send(filesInfo []FileInfo, emptyFoldersToTransfer []FileInfo, totalNumberFolders int) (err error) {
 	defer func() { err = c.redactError(err) }()
+	if c.Options.OnPhase != nil {
+		c.Options.OnPhase("Connecting")
+	}
+	totalSize := int64(0)
+	for _, file := range filesInfo {
+		totalSize += file.Size
+	}
+	c.progressMu.Lock()
+	c.progressTransferred, c.progressTotal = 0, totalSize
+	c.progressMu.Unlock()
+	if c.Options.OnProgress != nil {
+		c.Options.OnProgress(0, totalSize)
+	}
 	go c.stop.done()
 	defer c.stop.Cancel()
 	defer c.closeTailcatBundle()
@@ -1831,7 +1860,7 @@ func (c *Client) Send(filesInfo []FileInfo, emptyFoldersToTransfer []FileInfo, t
 		webURL = webReceiveURL(c.Options.WebOrigin, c.Options.SharedSecret)
 	}
 	clipboardNotice := ""
-	if !c.Options.DisableClipboard {
+	if !c.Options.SuppressOutput && !c.Options.DisableClipboard {
 		clipboardText := formatClipboardText(c.Options.SharedSecret, flags.String(), c.Options.ExtendedClipboard)
 		if copyToClipboard(clipboardText, true, c.Options.ExtendedClipboard) {
 			clipboardNotice = "code copied to clipboard"
@@ -1840,10 +1869,12 @@ func (c *Client) Send(filesInfo []FileInfo, emptyFoldersToTransfer []FileInfo, t
 			}
 		}
 	}
-	output, colorEnabled := termui.Output(os.Stderr)
-	fmt.Fprint(output, formatSendInstructions(c.Options.SharedSecret, flags.String(), webURL, clipboardNotice, colorEnabled))
-	if c.Options.ShowQrCode && webURL != "" {
-		showReceiveCommandQrCode(webURL)
+	if !c.Options.SuppressOutput {
+		output, colorEnabled := termui.Output(os.Stderr)
+		fmt.Fprint(output, formatSendInstructions(c.Options.SharedSecret, flags.String(), webURL, clipboardNotice, colorEnabled))
+		if c.Options.ShowQrCode && webURL != "" {
+			showReceiveCommandQrCode(webURL)
+		}
 	}
 	if c.Options.Ask {
 		machid, _ := machineid.ID()
@@ -2039,6 +2070,9 @@ func (c *Client) discoverReceivePeers() (discoveries []peerdiscovery.Discovered)
 // Receive will receive a file
 func (c *Client) Receive() (err error) {
 	defer func() { err = c.redactError(err) }()
+	if c.Options.OnPhase != nil {
+		c.Options.OnPhase("Connecting")
+	}
 	go c.stop.done()
 	defer c.stop.Cancel()
 	defer c.closeTailcatBundle()
@@ -2658,6 +2692,12 @@ func (c *Client) processSenderInfo(senderInfo SenderInfo) (done bool, err error)
 			}
 		}
 	}
+	c.progressMu.Lock()
+	c.progressTransferred, c.progressTotal = 0, totalSize
+	c.progressMu.Unlock()
+	if c.Options.OnProgress != nil {
+		c.Options.OnProgress(0, totalSize)
+	}
 	// check the totalSize does not exceed disk space
 	// usage := diskusage.NewDiskUsage(".")
 	// if usage.Available() < uint64(totalSize) {
@@ -2782,6 +2822,9 @@ func (c *Client) processMessagePake(m message.Message, attempt *transferAttemptS
 		}
 	}()
 	log.Debug("received pake payload")
+	if c.Options.OnPhase != nil {
+		c.Options.OnPhase("Authenticating")
+	}
 	if !c.Options.IsSender {
 		c.setReceiveStatus(receiveStatusAuthenticatingCode)
 	}
@@ -3593,6 +3636,9 @@ func (c *Client) updateIfRecipientHasFileInfo() (err error) {
 
 func (c *Client) fmtPrintUpdate() {
 	c.finishedNum++
+	if c.Options.SuppressOutput {
+		return
+	}
 	if display := c.progressDisplaySnapshot(); display != nil {
 		display.completeFile(c.finishedNum)
 		return

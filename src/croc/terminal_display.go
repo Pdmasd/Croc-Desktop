@@ -67,6 +67,9 @@ func (c *Client) newProgressBar(max int64, description string, throttle time.Dur
 
 func (c *Client) newDataUnitProgressBar(max int64, description string, throttle time.Duration, completed func()) *progressbar.ProgressBar {
 	output, colorEnabled := termui.Output(os.Stderr)
+	if c.Options.SuppressOutput {
+		output = io.Discard
+	}
 	return termui.NewProgress(termui.ProgressConfig{
 		Max:          max,
 		Description:  termui.ProgressDescription("", description, colorEnabled),

@@ -155,6 +155,7 @@ func (c *Client) setProgressBar(bar *progressbar.ProgressBar) {
 }
 
 func (c *Client) addProgress(delta int64) {
+	c.reportProgress(delta)
 	if display := c.progressDisplaySnapshot(); display != nil {
 		display.advance("", 0, delta)
 	}
@@ -164,6 +165,17 @@ func (c *Client) addProgress(delta int64) {
 	if bar != nil {
 		_ = bar.Add64(delta)
 	}
+}
+
+func (c *Client) reportProgress(delta int64) {
+	if c.Options.OnProgress == nil || delta <= 0 {
+		return
+	}
+	c.progressMu.Lock()
+	c.progressTransferred += delta
+	transferred, total := c.progressTransferred, c.progressTotal
+	c.Options.OnProgress(transferred, total)
+	c.progressMu.Unlock()
 }
 
 func (c *Client) finishProgress() {
